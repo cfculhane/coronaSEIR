@@ -108,3 +108,6 @@ venv.bak/
 /popup-dictionary/
 popup_wikipedia/cache.sqlite
 /dist/
+
+# For copyright reasons
+/papers/
