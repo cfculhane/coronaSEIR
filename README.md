@@ -1,10 +1,6 @@
 # coronavirus SEIR model
 
-Simple SEIR model Python script for the COVID-19 pandemic with real world data.  
-  
-Purpose is to easily be able to experiment and better understand what is happening currently and what might happen in the near future.  
-  
-What I learned: Activating containment measures early can save lives.  
+An SEIR model of the COVID-19 pandemic. Heavily based off a fork of [coronafighters work here](https://github.com/coronafighter/coronaSEIR)
   
 ## Disclaimer
 This is not a scientific or medical tool. Use at your own risk. BETA! There might be serious bugs.  
@@ -13,8 +9,7 @@ This is not a scientific or medical tool. Use at your own risk. BETA! There migh
 * SEIR epidemic model
 * Reduced R0 after a certain amount of days to account for containment measures.
 * Delays to allow for lagging official data etc.
-* hopefully easily readable code
-* Real world data automatically updated every three hours from Johns Hopkins CSSE (https://github.com/CSSEGISandData/2019-nCoV) via via https://github.com/ExpDev07/coronavirus-tracker-api
+* Real world data automatically updated every three hours from Johns Hopkins CSSE (https://github.com/CSSEGISandData/2019-nCoV) via  https://github.com/ExpDev07/coronavirus-tracker-api
 * country population data (https://github.com/samayo/country-json)
 * check out screenshots below
 
