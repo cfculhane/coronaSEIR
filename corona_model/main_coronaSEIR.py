@@ -1,15 +1,19 @@
 import logging
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Iterable, Tuple
 
 import matplotlib.pyplot as plt
 import matplotlib.widgets  # Cursor
 import numpy as np
 import pandas as pd
+import pprintpp
 import scipy.integrate
 import scipy.ndimage.interpolation
 
+from corona_model import PROJECT_DIR, log_pth
 from corona_model.countryinfo import CountryInfo
 from corona_model.params import DiseaseParams, SimOpts, PlotOpts
 from corona_model.world_data import CovidData
@@ -80,8 +84,8 @@ class SEIRModel(object):
         Y0 = [self.n_pop - s_opts.initial_exposed, s_opts.initial_exposed, 0, 0]  # S, E, I, R at initial step
 
         logger.info(f"Starting run of model...")
-        logger.info(f"DiseaseParams : {d_params}")
-        logger.info(f"SimOpts : {s_opts}")
+        logger.info(f"DiseaseParams : {pprintpp.pformat(disease_params)}")
+        logger.info(f"SimOpts : {pprintpp.pformat(sim_opts)}")
         logger.info(f"Initial conditions (S E I R): {Y0}")
 
         Y_RESULTS = scipy.integrate.solve_ivp(self.model_seir, t_span=[T[0], T[-1]],
@@ -139,14 +143,15 @@ class SEIRModel(object):
 
 class ResultAnalyser(object):
     """ Handles the analysing of the results. to add more results just add more functions and call them in .run()"""
-
+    output_dir = PROJECT_DIR.joinpath("outputs")
     def __init__(self, results: SimResults, p_opts: PlotOpts, date_range: pd.DatetimeIndex, n_pop: int,
-                 s_opts: SimOpts):
+                 s_opts: SimOpts, country_data):
         self.results = results
         self.p_opts = p_opts
         self.date_range = date_range
         self.n_pop = n_pop
         self.s_opts = s_opts
+        self.country_data = country_data
 
     def run(self):
         """ Runs analyses"""
@@ -157,8 +162,14 @@ class ResultAnalyser(object):
         logger.info(f"Predicted Values now:")
         timestep_now = np.where(self.date_range <= pd.Timestamp.now())[0][-1]
         self.print_info(timestep_now, self.results)
+        logger.info(f"REAL Confirmed: {self.country_data['all'].confirmed[-1]}")
+        logger.info(f"REAL Deaths: {self.country_data['all'].deaths[-1]}")
+
         date_iculimit = self.icu_results()
         self.plot(self.results, self.date_range, date_iculimit)
+
+        # Copy log file
+        shutil.copy2(Path(log_pth), self.output_dir.joinpath(Path(log_pth).name))
 
     def print_info(self, t: int, res: SimResults):
         logger.info("-" * 50)
@@ -171,7 +182,7 @@ class ResultAnalyser(object):
         logger.info("-" * 50)
 
     def per_pop(self, var):
-        return round((100 * var / self.n_pop), 2)
+        return round((100 * var / self.n_pop), 4)
 
     def icu_results(self):
         icu_limit = self.s_opts.icu_beds
@@ -190,7 +201,7 @@ class ResultAnalyser(object):
         ax.plot(date_range, results.S, 'b', alpha=0.5, lw=2, label='Susceptible')
         ax.plot(date_range, results.E, 'y', alpha=0.5, lw=2, label='Exposed')
         ax.plot(date_range, results.I, 'r--', alpha=0.5, lw=1, label='Infected')
-        ax.plot(date_range, results.F, color='orange', alpha=0.5, lw=1, label='Number detected in testing')
+        ax.plot(date_range, results.F, color='purple', alpha=0.5, lw=2, label='Number detected in testing')
         ax.plot(date_range, results.H, 'r', alpha=0.5, lw=2, label='Number in ICU')
         # ax.plot(X, R, 'g', alpha=0.5, lw=1, label='Recovered with immunity')
         ax.plot(date_range, results.P, 'c', alpha=0.5, lw=1, label='Probability of infection')
@@ -226,7 +237,8 @@ class ResultAnalyser(object):
             ax.spines[spine].set_visible(False)
         cursor = matplotlib.widgets.Cursor(ax, color='black', linewidth=1)
         plt.show()
-        plt.savefig('model_run.png')
+        fig.savefig(Path(self.output_dir, f"model_run_{datetime.now().date()}.png"))
+
 
 
 if __name__ == '__main__':
@@ -236,8 +248,12 @@ if __name__ == '__main__':
     disease_params = DiseaseParams()
     sim_opts = SimOpts()
     plot_opts = PlotOpts()
+
     # Change any options here on the fly
-    sim_opts.real_data_offset = 12
+    sim_opts.real_data_offset = 19
+    sim_opts.add_delays = False
+
+    plot_opts.plot_log = True
 
 
 
@@ -253,5 +269,5 @@ if __name__ == '__main__':
     start_date = country_data["all"].index[0] + pd.Timedelta(days=sim_opts.real_data_offset)
     date_range = pd.date_range(start_date, periods=len(results.T), freq="D")
 
-    analyser = ResultAnalyser(results, plot_opts, date_range, n_pop=model.n_pop, s_opts=sim_opts)
+    analyser = ResultAnalyser(results, plot_opts, date_range, n_pop=model.n_pop, s_opts=sim_opts, country_data=country_data)
     analyser.run()

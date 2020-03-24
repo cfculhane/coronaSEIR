@@ -112,3 +112,6 @@ popup_wikipedia/cache.sqlite
 # For copyright reasons
 /papers/
 **/*covid_data.pickle
+
+# Outputs
+outputs/

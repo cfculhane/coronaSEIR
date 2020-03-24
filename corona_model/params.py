@@ -3,8 +3,6 @@ File to store all simulation parameters of main_corona_SEIR.py
 """
 from dataclasses import dataclass
 
-import numpy as np
-
 
 @dataclass()
 class DiseaseParams:
@@ -32,15 +30,15 @@ class DiseaseParams:
     time_hospital: int = 20  # Days in hospital
     time_infected: int = 1.0 / gamma
 
-    lag_communication: int = 1
-    lag_testing: int = 5
-    lag_symptom_to_hosp: int = 0
+    lag_communication: int = 0
+    lag_testing: int = 2
+    lag_symptom_to_hosp: int = 1
 
     rate_icu: float = 0.02  # Proportion of infected patients who end up in ICU
-    rate_fatality_0: float = 0.05  # CFR of patients that 'recover' - either dead or alive
+    rate_fatality_0: float = 0.01  # CFR of patients that 'recover' - either dead or alive
     rate_fatality_1 = rate_fatality_0 * 2  # CFR once ICU beds are saturated  #TODO Need source
 
-    frac_asymptomatic = 0.25  # Fraction of infected that don't show symptoms
+    frac_asymptomatic = 0.0  # Fraction of infected that don't show symptoms
     find_ratio = (1 - frac_asymptomatic) / 2  # a lot of the mild cases will go undetected  assuming 100% correct tests
 
 
@@ -60,4 +58,3 @@ class SimOpts:
 @dataclass
 class PlotOpts:
     plot_log: bool = True  # If true, plots will have a log y axis
-
