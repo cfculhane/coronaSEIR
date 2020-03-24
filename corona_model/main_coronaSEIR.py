@@ -1,175 +1,257 @@
-import math
+import logging
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Iterable, Tuple
 
 import matplotlib.pyplot as plt
 import matplotlib.widgets  # Cursor
 import numpy as np
+import pandas as pd
 import scipy.integrate
+import scipy.ndimage.interpolation
 
-import population
-import world_data
+from corona_model.countryinfo import CountryInfo
+from corona_model.params import DiseaseParams, SimOpts, PlotOpts
+from corona_model.world_data import CovidData
 
-COUNTRY = 'Australia'  # South Korea'  #  e.g. 'France'  'Republic of Korea' 'Italy' 'Germany'
-PROVINCE = 'all'  # 'all'  # 'Hubei'
-
-# populations = {'Germany' : 81E6, 'France' : 67E6, 'Italy' : 61E6, 'Iran' : 81E6,
-# 'China' : 1438E6, 'Hubei' : 59E6, 'Republic of Korea' : 51E6}
-
-if PROVINCE == 'all':
-    population = population.get_population(COUNTRY)
-else:
-    population = populations[PROVINCE]  # to be implemented
-
-intensiveUnits = 45000  # ICU units available  # Germany: 28000
-
-logPlot = True
-
-E0 = 1  # exposed at initial time step
-
-days = 100  # total days to model
-
-dataOffset = -3  # how many days will the real world country data be delayed in the model
-
-LOCKDOWN = False
-lockdown_delay = dataOffset + 365  # days before lockdown measures
-
-beta0 = 1.0 / 2.5  # The parameter controlling how often a susceptible-infected contact results in a new infection.
-beta1 = beta0 / 4  # beta0 is used during days0 phase, beta1 after days0
-
-gamma = 1.0 / (10 + 3)  # The rate an infected recovers and moves into the resistant phase.
-sigma = 1.0 / (5 - 3)  # The rate at which an exposed person becomes infective.
-# https://www.reddit.com/r/COVID19/comments/fgark3/estimating_the_generation_interval_for_covid19/
-# three days shorter because it seems there are earlier infections, goes into gamma
-
-noSymptoms = 0.2  # https://www.reddit.com/r/COVID19/comments/ffzqzl/estimating_the_asymptomatic_proportion_of_2019/
-findRatio = (1 - noSymptoms) / 2  # a lot of the mild cases will go undetected  assuming 100% correct tests
-
-timeInHospital = 20
-timeInfected = 1.0 / gamma
-
-# lag, whole days
-communicationLag = 2
-testLag = 7
-symptomToHospitalLag = 5
-
-icuRate = 0.02
-infectionFatalityRateA = 0.05
-infectionFatalityRateB = infectionFatalityRateA * 2  # higher lethality without ICU - by how much?
-
-r0 = beta0 / gamma  # somehow an r0 of 3.0 seems to low
-r1 = beta1 / gamma
-
-print("r0: %.2f" % r0, "   r1: %.2f" % r1)
-
-# https://hal.archives-ouvertes.fr/hal-00657584/document page 13
-s1 = 0.5 * (-(sigma + gamma) + math.sqrt((sigma + gamma) ** 2 + 4 * sigma * gamma * (r0 - 1)))
-print("doubling0 every ~%.1f" % (math.log(2.0, math.e) / s1), "days")
+logger = logging.getLogger(__name__)
+logging.getLogger("matplotlib").setLevel(logging.INFO)
 
 
-def model_seir(x, state, N, beta0, days0, beta1, gamma, sigma):
-    # :param array x: Time step (days)
-    # :param int N: Population
-    # :param float beta: The parameter controlling how often a susceptible-infected contact results in a new infection.
-    # :param float gamma: The rate an infected recovers and moves into the resistant phase.
-    # :param float sigma: The rate at which an exposed person becomes infective.
-
-    S, E, I, R = state
-
-    if LOCKDOWN is True:
-        beta = beta0 if x <= days0 else beta1
-    else:
-        beta = beta0
-
-    dS = - beta * S * I / N
-    dE = beta * S * I / N - sigma * E
-    dI = sigma * E - gamma * I
-    dR = gamma * I
-    return dS, dE, dI, dR
+@dataclass
+class SimResults:
+    """ Class to store results"""
+    T: np.ndarray  # Time-step (days), vector variable of ODEs
+    S: np.ndarray  # Susceptible at each timestep
+    E: np.ndarray  # Exposed at each timestep
+    I: np.ndarray  # Infected at each timestep
+    R: np.ndarray  # Recovered at each timestep
+    D: np.ndarray = np.zeros(0)  # Deaths at each timestep
+    F: np.ndarray = np.zeros(0)  # Found at each timestep
+    H: np.ndarray = np.zeros(0)  # Hospitalised at each timestep
+    P: np.ndarray = np.zeros(0)  # Probability of random person being infected at each timestep
 
 
-def solve(model, population, E0, beta0, days0, beta1, gamma, sigma):
-    X = np.arange(days)  # time steps array
-    N0 = population - E0, E0, 0, 0  # S, E, I, R at initial step
+class SEIRModel(object):
+    """ A SEIR model of the COVID-19 including ICU Saturation and testing delays."""
 
-    y_data_var = scipy.integrate.solve_ivp(model, t_span=[X[0], X[-1]],
-                                           y0=N0, args=(population, beta0, days0, beta1, gamma, sigma),
-                                           t_eval=X)
+    def __init__(self, country_name: str):
+        """
+        :param country_name: Full name of country, e.g. "Australia"
+        """
+        self.country = CountryInfo(country_name)
+        self.n_pop = self.country.population()
 
-    S, E, I, R = y_data_var.y  # transpose and unpack
-    return X, S, E, I, R  # note these are all arrays
+    def model_seir(self, t: float, state: Iterable[np.ndarray], d_params: DiseaseParams,
+                   s_opts: SimOpts) -> Tuple[float, float, float, float]:
+        """
+        Definition of SEIR model
+        :param t: Time-step (days), dependant variable of ODEs
+        :param state: Vector of ODE State variables [S, E, I, R]
+        :param d_params: DiseaseParams dataclass from params, or your own/modified version
+        :param s_opts: SimOpts dataclass from params, or your own/modified version
+        :returns: 4-element tuple of change in each of the state variables
+        """
+        N = self.n_pop  # Population of country
+        S, E, I, R = state
+
+        if SimOpts.lockdown is True:
+            beta = d_params.beta_init if t <= s_opts.lockdown_delay else d_params.beta_lock
+        else:
+            beta = d_params.beta_init
+
+        sigma = d_params.sigma
+        gamma = d_params.gamma
+
+        dS = - beta * S * I / N
+        dE = beta * S * I / N - sigma * E
+        dI = sigma * E - gamma * I
+        dR = gamma * I
+        return dS, dE, dI, dR
+
+    def run_model(self, d_params: DiseaseParams, s_opts: SimOpts) -> SimResults:
+        """
+        Solves the ODE model and returns results.
+        :param d_params: d_params: DiseaseParams dataclass from params, or your own/modified version
+        :param s_opts: s_opts: SimOpts dataclass from params, or your own/modified version
+        :returns: 5-element Tuple of arrays of results
+        """
+        T = np.arange(s_opts.sim_length)  # time-step Array
+        Y0 = [self.n_pop - s_opts.initial_exposed, s_opts.initial_exposed, 0, 0]  # S, E, I, R at initial step
+
+        logger.info(f"Starting run of model...")
+        logger.info(f"DiseaseParams : {d_params}")
+        logger.info(f"SimOpts : {s_opts}")
+        logger.info(f"Initial conditions (S E I R): {Y0}")
+
+        Y_RESULTS = scipy.integrate.solve_ivp(self.model_seir, t_span=[T[0], T[-1]],
+                                              y0=Y0, args=(d_params, s_opts),
+                                              t_eval=T)
+
+        S, E, I, R = Y_RESULTS.y  # transpose and unpack
+
+        logger.info(f"Solve complete!")
+        raw_results = SimResults(T=T, S=S, E=E, I=I, R=R)
+        parsed_results = self._parse_results(raw_results, d_params, s_opts)
+        logger.info(f"Results successfully parsed.")
+        return parsed_results
+
+    def _parse_results(self, res: SimResults, d_params: DiseaseParams, s_opts: SimOpts) -> SimResults:
+        """
+        Parses the results created in run_model()
+        :param res: SimResults from a model run
+        :param d_params: d_params: DiseaseParams dataclass from params, or your own/modified version
+        :param s_opts: s_opts: SimOpts dataclass from params, or your own/modified version
+        :returns:
+        """
+        T, S, E, I, R = res.T, res.S, res.E, res.I, res.R
+        F = I * d_params.find_ratio
+        H = I * d_params.rate_icu * d_params.time_hospital / d_params.time_hospital
+        P = I / self.n_pop * 1000000  # Probability of random person to be infected
+
+        # estimate deaths from recovered
+        D = np.arange(s_opts.sim_length)
+        RPrev = 0
+        DPrev = 0
+        for i, t in enumerate(res.T):
+            IFR = d_params.rate_fatality_0 if H[i] <= s_opts.icu_beds else d_params.rate_fatality_1
+            D[i] = DPrev + IFR * (R[i] - RPrev)
+            RPrev = R[i]
+            DPrev = D[i]
+
+        if s_opts.add_delays is True:
+            F = self.delay(F, d_params.lag_symptom_to_hosp + d_params.lag_testing + d_params.lag_communication)
+            H = self.delay(H, d_params.lag_symptom_to_hosp)  # ICU  from I
+            D = self.delay(D, d_params.time_hospital + d_params.lag_communication)  # deaths  from R
+
+        # Update result object
+        res.P = P
+        res.F = F
+        res.H = P
+        res.D = D
+
+        return res
+
+    @staticmethod
+    def delay(arr: np.ndarray, days: int):
+        return scipy.ndimage.interpolation.shift(arr, days, cval=0)
 
 
-X, S, E, I, R = solve(model_seir, population, E0, beta0, lockdown_delay, beta1, gamma, sigma)
+class ResultAnalyser(object):
+    """ Handles the analysing of the results. to add more results just add more functions and call them in .run()"""
 
-F = I * findRatio
-H = I * icuRate * timeInHospital / timeInfected
-P = I / population * 1000000  # probability of random person to be infected
+    def __init__(self, results: SimResults, p_opts: PlotOpts, date_range: pd.DatetimeIndex, n_pop: int,
+                 s_opts: SimOpts):
+        self.results = results
+        self.p_opts = p_opts
+        self.date_range = date_range
+        self.n_pop = n_pop
+        self.s_opts = s_opts
 
-# estimate deaths from recovered
-D = np.arange(days)
-RPrev = 0
-DPrev = 0
-for i, x in enumerate(X):
-    IFR = infectionFatalityRateA if H[i] <= intensiveUnits else infectionFatalityRateB
-    D[i] = DPrev + IFR * (R[i] - RPrev)
-    RPrev = R[i]
-    DPrev = D[i]
+    def run(self):
+        """ Runs analyses"""
+        logger.info(f"Predicted Starting values:")
+        self.print_info(0, self.results)
+        logger.info(f"Predicted Ending values:")
+        self.print_info(self.results.T[-1], self.results)
+        logger.info(f"Predicted Values now:")
+        timestep_now = np.where(self.date_range <= pd.Timestamp.now())[0][-1]
+        self.print_info(timestep_now, self.results)
+        date_iculimit = self.icu_results()
+        self.plot(self.results, self.date_range, date_iculimit)
 
-# add delays
-F = world_data.delay(F, symptomToHospitalLag + testLag + communicationLag)  # found in tests; from I
-H = world_data.delay(H, symptomToHospitalLag)  # ICU  from I
-D = world_data.delay(D, timeInHospital + communicationLag)  # deaths  from R
+    def print_info(self, t: int, res: SimResults):
+        logger.info("-" * 50)
+        logger.info(f"Day {t} | Date: {self.date_range[t]}")
+        logger.info(f"Infected: {int(res.I[t])}, {self.per_pop(res.I[t])} %")
+        logger.info(f"Found in testing: {int(res.F[t])}, {self.per_pop(res.F[t])} %")
+        logger.info(f"Hospitalised: {int(res.H[t])}, {self.per_pop(res.H[t])} %")
+        logger.info(f"Recovered: {int(res.R[t])}, {self.per_pop(res.R[t])} %")
+        logger.info(f"Deaths: {int(res.D[t])}, {self.per_pop(res.D[t])} %")
+        logger.info("-" * 50)
+
+    def per_pop(self, var):
+        return round((100 * var / self.n_pop), 2)
+
+    def icu_results(self):
+        icu_limit = self.s_opts.icu_beds
+        tstep_iculimit = np.where(self.results.H >= icu_limit)[0][0]
+        date_iculimit = self.date_range[tstep_iculimit]
+        logger.info(f"Date when ICU limit hit: {date_iculimit.date()}")
+        logger.info(f"ICU limit hit in: {(date_iculimit - datetime.now()).days}")
+        return date_iculimit
+
+    def plot(self, results: SimResults, date_range, date_iculimit):
+        fig = plt.figure(dpi=75, figsize=(20, 16))
+        ax = fig.add_subplot(111)
+        if plot_opts.plot_log:
+            ax.set_yscale("log", nonposy='clip')
+
+        ax.plot(date_range, results.S, 'b', alpha=0.5, lw=2, label='Susceptible')
+        ax.plot(date_range, results.E, 'y', alpha=0.5, lw=2, label='Exposed')
+        ax.plot(date_range, results.I, 'r--', alpha=0.5, lw=1, label='Infected')
+        ax.plot(date_range, results.F, color='orange', alpha=0.5, lw=1, label='Number detected in testing')
+        ax.plot(date_range, results.H, 'r', alpha=0.5, lw=2, label='Number in ICU')
+        # ax.plot(X, R, 'g', alpha=0.5, lw=1, label='Recovered with immunity')
+        ax.plot(date_range, results.P, 'c', alpha=0.5, lw=1, label='Probability of infection')
+        ax.plot(date_range, results.D, 'k', alpha=0.5, lw=1, label='Deaths')
+
+        ax.plot([min(date_range), max(date_range)], [sim_opts.icu_beds, sim_opts.icu_beds], 'r-.', alpha=1, lw=1,
+                label='Number of ICU available')
+        ax.plot([datetime.now(), datetime.now()], [min(results.I), max(results.I)],
+                '-.', alpha=0.5, lw=1, label='TODAY')
+
+        ax.plot([date_iculimit, date_iculimit], [min(results.I), max(results.I)],
+                'r-', alpha=0.5, lw=2, label=f'ICU LIMIT REACHED {date_iculimit.date()}')
+
+        if sim_opts.lockdown is True:
+            ax.plot([sim_opts.lockdown_delay, sim_opts.lockdown_delay], [min(results.I), max(results.I)],
+                    'b-.', alpha=0.5, lw=1, label='Lockdown Starts')
+
+        # Real data
+        ax.plot(country_data["all"].confirmed, 'o', color='orange', alpha=0.5, lw=1,
+                label='Confirmed Cases')
+        ax.plot(country_data["all"].deaths, 'x', color='black', alpha=0.5, lw=1,
+                label='Deceased cases')
+
+        ax.set_xlabel('Time (days)')
+        ax.set_ylabel('Number')
+        ax.set_ylim(bottom=1.0)
+
+        ax.grid(linestyle=':')
+        legend = ax.legend(title=f"COVID-19 SEIR model: {COUNTRY}, population: {round(model.n_pop / 1E6)} million \n"
+                                 f"Model is for beta use only!")
+        legend.get_frame().set_alpha(0.5)
+        for spine in ('top', 'right', 'bottom', 'left'):
+            ax.spines[spine].set_visible(False)
+        cursor = matplotlib.widgets.Cursor(ax, color='black', linewidth=1)
+        plt.show()
+        plt.savefig('model_run.png')
 
 
-def print_info(i):
-    print("day %d" % i)
-    print(" Infected: %d" % I[i], "%.1f" % (I[i] * 100.0 / population))
-    print(" Infected found: %d" % F[i], "%.1f" % (F[i] * 100.0 / population))
-    print(" Hospital: %d" % H[i], "%.1f" % (H[i] * 100.0 / population))
-    print(" Recovered: %d" % R[i], "%.1f" % (R[i] * 100.0 / population))
-    print(" Deaths: %d" % D[i], "%.1f" % (D[i] * 100.0 / population))
+if __name__ == '__main__':
+    # Load in options and parameters
+    COUNTRY = "Australia"
+    country_info = CountryInfo(COUNTRY)
+    disease_params = DiseaseParams()
+    sim_opts = SimOpts()
+    plot_opts = PlotOpts()
+    # Change any options here on the fly
+    sim_opts.real_data_offset = 12
 
-if LOCKDOWN is True:
-    print_info(lockdown_delay)
-print_info(days - 1)
 
-# Plot
-fig = plt.figure(dpi=75, figsize=(20, 16))
-ax = fig.add_subplot(111)
-if logPlot:
-    ax.set_yscale("log", nonposy='clip')
 
-# ax.plot(X, S, 'b', alpha=0.5, lw=2, label='Susceptible')
-# ax.plot(X, E, 'y', alpha=0.5, lw=2, label='Exposed')
-ax.plot(X, I, 'r--', alpha=0.5, lw=1, label='Infected')
-ax.plot(X, F, color='orange', alpha=0.5, lw=1, label='Number detected in testing')
-ax.plot(X, H, 'r', alpha=0.5, lw=2, label='Number in ICU')
-# ax.plot(X, R, 'g', alpha=0.5, lw=1, label='Recovered with immunity')
-ax.plot(X, P, 'c', alpha=0.5, lw=1, label='Probability of infection')
-ax.plot(X, D, 'k', alpha=0.5, lw=1, label='Deaths')
+    # Get real data and shift if required
+    covid_data = CovidData()
+    country_data = covid_data.world_data[country_info.iso(2)]
 
-ax.plot([min(X), max(X)], [intensiveUnits, intensiveUnits], 'b-.', alpha=0.5, lw=1, label='Number of ICU available')
-if LOCKDOWN is True:
-    ax.plot([lockdown_delay, lockdown_delay], [min(I), max(I)], 'b-.', alpha=0.5, lw=1, label='Lockdown Starts')
-# actual country data
-XCDR_data = np.array(world_data.get_country_xcdr(COUNTRY, PROVINCE, date_offset=dataOffset))
+    # Run model
+    model = SEIRModel("Australia")
+    results = model.run_model(disease_params, sim_opts)
 
-ax.plot(XCDR_data[:, 0], XCDR_data[:, 1], 'o', color='orange', alpha=0.5, lw=1,
-        label='cases actually detected in tests')
-ax.plot(XCDR_data[:, 0], XCDR_data[:, 2], 'x', color='black', alpha=0.5, lw=1, label='actually deceased')
+    # Analyse
+    start_date = country_data["all"].index[0] + pd.Timedelta(days=sim_opts.real_data_offset)
+    date_range = pd.date_range(start_date, periods=len(results.T), freq="D")
 
-# print(XCDR_data[0:30])
-
-ax.set_xlabel('Time (days)')
-ax.set_ylabel('Number')
-ax.set_ylim(bottom=1.0)
-
-ax.grid(linestyle=':')  # b=True, which='major', c='w', lw=2, ls='-')
-legend = ax.legend(title='COVID-19 SEIR model: ' + COUNTRY + " " + PROVINCE +
-                         ' %dk' % (population / 1000) + ' (beta)')
-legend.get_frame().set_alpha(0.5)
-for spine in ('top', 'right', 'bottom', 'left'):
-    ax.spines[spine].set_visible(False)
-cursor = matplotlib.widgets.Cursor(ax, color='black', linewidth=1)
-plt.show()
-plt.savefig('model_run.png')
-
+    analyser = ResultAnalyser(results, plot_opts, date_range, n_pop=model.n_pop, s_opts=sim_opts)
+    analyser.run()

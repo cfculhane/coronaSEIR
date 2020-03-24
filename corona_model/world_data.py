@@ -37,12 +37,12 @@ class CovidData(object):
         if self.covid_data_pth.exists() is False or \
                 (self.covid_data_pth.stat().st_mtime < time.time() - COVID_DATA_CACHETIME):
             raw_data = self.get_covid_data()
-            self.country_data = self.parse_rawdata(raw_data)
-            self.covid_data_pth.write_bytes(pickle.dumps(self.country_data))
+            self.world_data = self.parse_rawdata(raw_data)
+            self.covid_data_pth.write_bytes(pickle.dumps(self.world_data))
             logger.info(f"Covid data successfully written to {self.covid_data_pth}")
 
         else:
-            self.country_data = pickle.loads(self.covid_data_pth.read_bytes())
+            self.world_data = pickle.loads(self.covid_data_pth.read_bytes())
             logger.info(f"Covid data successfully read from {self.covid_data_pth}")
 
     def get_covid_data(self, country_code: Optional[str] = None) -> str:
@@ -52,12 +52,9 @@ class CovidData(object):
         :param country_code: The ISO (alpha-2 country_code) for the country
         :returns: JSON encoded string of response
         """
+        logger.info(f"Downloading latest data from {self.url}")
         req = requests.get(self.url, params={"country_code": country_code})
         return req.text
-
-    @staticmethod
-    def delay(arr: np.ndarray, days: int):
-        return scipy.ndimage.interpolation.shift(arr, days, cval=0)
 
     def parse_rawdata(self, raw_json: str):
         data_raw = json.loads(raw_json)
@@ -66,6 +63,10 @@ class CovidData(object):
             for loc in tqdm(data_raw[y_var]["locations"], desc=f"Parsing {y_var} data"):
                 country_code = loc["country_code"]
                 province = loc["province"] if loc["province"] != "" else "all"
+                if province != "all" and province in CONFIG["covid_data"]["province_ignore"]:
+                    logger.warning(f"Ignoring province: '{province}' as it is in ignore list in config.yaml")
+                    continue
+
                 new_hist = {}
                 for str_date, y_val in loc["history"].items():  # Note USA datetime ordering in source
                     date_obj = dateparser.parse(str_date, dayfirst=False)
@@ -89,7 +90,7 @@ class CovidData(object):
         return country_data
 
     def plot_location(self, ax: plt.Axes, country_code: str, province: str = "all", logscale=True):
-        chosen_df = self.country_data[country_code][province]
+        chosen_df = self.world_data[country_code][province]
         ax.plot(chosen_df.confirmed, 'b', alpha=0.5, lw=2, label='confirmed')
         ax.plot(chosen_df.deaths, 'y', alpha=0.5, lw=2, label='deaths')
         ax.plot(chosen_df.recovered, 'r--', alpha=0.5, lw=1, label='recovered')

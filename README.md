@@ -3,7 +3,7 @@
 An SEIR model of the COVID-19 pandemic. Heavily based off a fork of [coronafighters work here](https://github.com/coronafighter/coronaSEIR)
   
 ## Disclaimer
-This is not a scientific or medical tool. Use at your own risk. BETA! There might be serious bugs.  
+This is not a scientific or medical tool. Use at your own risk. 
 
 ## Features
 * SEIR epidemic model
@@ -14,11 +14,11 @@ This is not a scientific or medical tool. Use at your own risk. BETA! There migh
 * check out screenshots below
 
 ## Installation / Requirements / Documentation
-Needs Python 3.x installed. Tested on Ubuntu. Should run on Window and Mac, too.
+Needs Python 3.x installed. 
   
 ```
 $ pip3 install --upgrade numpy scipy matplotlib python-dateutil  # might need sudo -H pip3 ...
-$ python3 ./main_coronaSEIR.py
+$ python3 ./corona_model/main_coronaSEIR.py
 read data: 843103 bytes
 r0: 5.20    r1: 1.30
 doubling0 every ~3.4 days
@@ -43,11 +43,8 @@ Note: Make sure you got correct number for population and available ICU units fo
 ## ToDo
 * automatic date offset
 * maybe find a better fit with lower R0
-* add proper list of populations
 * add data about intensive care units
-* use real dates instead of days?
 * ventilator patients separately?
-* make parsing code cleaner / simpler
 * be more precise in differentiation between hospitalization and ICU
 
 ## Credits
@@ -64,14 +61,12 @@ https://hal.archives-ouvertes.fr/hal-00657584/document
 https://institutefordiseasemodeling.github.io/Documentation/general/model-seir.html  
   
 Parameters:  
-https://www.reddit.com/r/COVID19/comments/fbdzc1/coronavirus_epidemiology_metaanalysis_and/
-https://www.reddit.com/r/COVID19/comments/fbxk43/update_open_source_simple_coronavirus_modeling/
-https://www.reddit.com/r/COVID19/comments/fd6lmg/infectionfatalityratio_ifr_of_covid19_is/  
-https://www.reddit.com/r/COVID19/comments/ffzqzl/estimating_the_asymptomatic_proportion_of_2019/  
-https://www.reddit.com/r/Coronavirus/comments/f8k2nj/why_sarscov2_is_not_just_the_flu_with_sources/ 
+Master CoVidActNow CoVid-19 Model - https://docs.google.com/spreadsheets/d/1YEj4Vr6lG1jQ1R3LG6frijJYNynKcgTjzo2n0FsBwZA/htmlview?#
+
 https://www.medrxiv.org/content/10.1101/2020.03.05.20031815v1  
-http://www.cidrap.umn.edu/news-perspective/2020/03/short-time-between-serial-covid-19-cases-may-hinder-containment  
-some more in the source code
+
+Country Data:
+https://github.com/porimol/countryinfo
 
 ## Screenshots
 ![model run](https://github.com/coronafighter/coronaSEIR/blob/master/screenshots/model_run.png)

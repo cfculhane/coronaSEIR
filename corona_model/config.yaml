@@ -6,3 +6,4 @@ paths:  # Relative to project directory. Use '/' characters, will be read as pat
 
 covid_data:
     cache_time: 3600  # In seconds, cache time of COVID data to limit requests
+    province_ignore: ["From Diamond Princess"]  # Ignore provinces in parsing of data to avoid parsing errors or bad data
