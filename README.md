@@ -44,7 +44,10 @@ Country Data:
 https://github.com/porimol/countryinfo
 
 ## Examples
+Without any lockdown or testing delays:
 ![Without Lockdown](https://github.com/cfculhane/coronaSEIR/blob/master/examples/NoLockdown.png)
+
+With lockdown reducing R0 to halve intital R0
 ![With Lockdown](https://github.com/cfculhane/coronaSEIR/blob/master/examples/Lockdown-R0-halved.png)
 
 

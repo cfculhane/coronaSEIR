@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Tuple
-
+import dataclasses
 import matplotlib.pyplot as plt
 import matplotlib.widgets  # Cursor
 import numpy as np
@@ -84,8 +84,8 @@ class SEIRModel(object):
         Y0 = [self.n_pop - s_opts.initial_exposed, s_opts.initial_exposed, 0, 0]  # S, E, I, R at initial step
 
         logger.info(f"Starting run of model...")
-        logger.info(f"DiseaseParams : {pprintpp.pformat(disease_params)}")
-        logger.info(f"SimOpts : {pprintpp.pformat(sim_opts)}")
+        logger.info(f"DiseaseParams : {pprintpp.pformat(dataclasses.asdict(disease_params))}")
+        logger.info(f"SimOpts : {pprintpp.pformat(dataclasses.asdict(sim_opts))}")
         logger.info(f"Initial conditions (S E I R): {Y0}")
 
         Y_RESULTS = scipy.integrate.solve_ivp(self.model_seir, t_span=[T[0], T[-1]],
