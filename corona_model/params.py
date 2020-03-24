@@ -13,7 +13,7 @@ class DiseaseParams:
     # Beta controls how often a susceptible-infected contact results in a new infection.
     # Source:
     beta_init: float = 1.0 / 2.5  # Intial beta before lockdown
-    beta_lock: float = beta_init / 2  # Used after lockdown occurs # TODO Need source
+    beta_lock: float = beta_init * 0.5  # Used after lockdown occurs # TODO Need source
 
     # Gamma rate an infected recovers and moves into the recovered phase.
     # Source:
@@ -46,13 +46,13 @@ class DiseaseParams:
 class SimOpts:
     """ Simulation Options"""
     sim_length: int = 200  # In days
-    lockdown: bool = False  # If True, a lockdown will be simulated by changing beta
-    lockdown_delay: int = 50  # In Days, from start of exposure
-    icu_beds: int = 4000  # ICU units available  # Germany: 28000
+    lockdown: bool = True  # If True, a lockdown will be simulated by changing beta
+    lockdown_delay: int = 25  # In Days, from start of exposure
+    icu_beds: int = 4000  # ICU units available
     # hosp_beds: int = 0  # TODO Use this
-    real_data_offset: int = -3  # How many days will the real world country data be delayed in the model
+    real_data_offset: int = 19  # How many days will the real world country data be delayed in the model
     initial_exposed: int = 1  # Number of initially exposed people
-    add_delays: bool = True  # If True, will add delays to found cases, hospitalised, and deaths
+    add_delays: bool = True  # If True, will add delays to found cases, hospitalised, and deaths based on lags in DiseaseParams
 
 
 @dataclass

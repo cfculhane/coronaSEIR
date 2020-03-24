@@ -43,5 +43,10 @@ https://www.medrxiv.org/content/10.1101/2020.03.05.20031815v1
 Country Data:
 https://github.com/porimol/countryinfo
 
+## Examples
+![Without Lockdown](https://github.com/cfculhane/coronaSEIR/blob/master/examples/NoLockdown.png)
+![With Lockdown](https://github.com/cfculhane/coronaSEIR/blob/master/examples/Lockdown-R0-halved.png)
+
+
 ## License
 MIT license

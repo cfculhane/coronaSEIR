@@ -59,7 +59,7 @@ class SEIRModel(object):
         N = self.n_pop  # Population of country
         S, E, I, R = state
 
-        if SimOpts.lockdown is True:
+        if s_opts.lockdown is True:
             beta = d_params.beta_init if t <= s_opts.lockdown_delay else d_params.beta_lock
         else:
             beta = d_params.beta_init
@@ -144,6 +144,7 @@ class SEIRModel(object):
 class ResultAnalyser(object):
     """ Handles the analysing of the results. to add more results just add more functions and call them in .run()"""
     output_dir = PROJECT_DIR.joinpath("outputs")
+
     def __init__(self, results: SimResults, p_opts: PlotOpts, date_range: pd.DatetimeIndex, n_pop: int,
                  s_opts: SimOpts, country_data):
         self.results = results
@@ -176,7 +177,7 @@ class ResultAnalyser(object):
         logger.info(f"Day {t} | Date: {self.date_range[t]}")
         logger.info(f"Infected: {int(res.I[t])}, {self.per_pop(res.I[t])} %")
         logger.info(f"Found in testing: {int(res.F[t])}, {self.per_pop(res.F[t])} %")
-        logger.info(f"Hospitalised: {int(res.H[t])}, {self.per_pop(res.H[t])} %")
+        logger.info(f"In ICU: {int(res.H[t])}, {self.per_pop(res.H[t])} %")
         logger.info(f"Recovered: {int(res.R[t])}, {self.per_pop(res.R[t])} %")
         logger.info(f"Deaths: {int(res.D[t])}, {self.per_pop(res.D[t])} %")
         logger.info("-" * 50)
@@ -210,13 +211,15 @@ class ResultAnalyser(object):
         ax.plot([min(date_range), max(date_range)], [sim_opts.icu_beds, sim_opts.icu_beds], 'r-.', alpha=1, lw=1,
                 label='Number of ICU available')
         ax.plot([datetime.now(), datetime.now()], [min(results.I), max(results.I)],
-                '-.', alpha=0.5, lw=1, label='TODAY')
+                '-', alpha=0.5, lw=2, label='TODAY')
 
         ax.plot([date_iculimit, date_iculimit], [min(results.I), max(results.I)],
                 'r-', alpha=0.5, lw=2, label=f'ICU LIMIT REACHED {date_iculimit.date()}')
 
-        if sim_opts.lockdown is True:
-            ax.plot([sim_opts.lockdown_delay, sim_opts.lockdown_delay], [min(results.I), max(results.I)],
+        if self.s_opts.lockdown is True:
+            lockdown_date = date_range[self.s_opts.lockdown_delay].to_pydatetime().date()
+            logger.info(f"Lockdown date: {lockdown_date}")
+            ax.plot([lockdown_date, lockdown_date], [min(results.I), max(results.I)],
                     'b-.', alpha=0.5, lw=1, label='Lockdown Starts')
 
         # Real data
@@ -240,7 +243,6 @@ class ResultAnalyser(object):
         fig.savefig(Path(self.output_dir, f"model_run_{datetime.now().date()}.png"))
 
 
-
 if __name__ == '__main__':
     # Load in options and parameters
     COUNTRY = "Australia"
@@ -249,13 +251,12 @@ if __name__ == '__main__':
     sim_opts = SimOpts()
     plot_opts = PlotOpts()
 
-    # Change any options here on the fly
-    sim_opts.real_data_offset = 19
-    sim_opts.add_delays = False
-
-    plot_opts.plot_log = True
-
-
+    # Over-ride any options here on the fly, check params.py for all parameters!
+    sim_opts.real_data_offset = 19  # How many days will the real world country data be delayed in the model
+    sim_opts.add_delays = False  # If True, will add delays to found cases, hospitalised, and deaths based on lags in DiseaseParams
+    sim_opts.lockdown = True  # If True, a lockdown will be simulated by changing beta
+    sim_opts.lockdown_delay = 45  # In Days, from start of exposure
+    plot_opts.plot_log = True  # If true, plots will have a log y axis
 
     # Get real data and shift if required
     covid_data = CovidData()
@@ -269,5 +270,6 @@ if __name__ == '__main__':
     start_date = country_data["all"].index[0] + pd.Timedelta(days=sim_opts.real_data_offset)
     date_range = pd.date_range(start_date, periods=len(results.T), freq="D")
 
-    analyser = ResultAnalyser(results, plot_opts, date_range, n_pop=model.n_pop, s_opts=sim_opts, country_data=country_data)
+    analyser = ResultAnalyser(results, plot_opts, date_range, n_pop=model.n_pop, s_opts=sim_opts,
+                              country_data=country_data)
     analyser.run()
