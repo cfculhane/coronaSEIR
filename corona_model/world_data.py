@@ -1,139 +1,112 @@
 import json
-import dateutil.parser
-import datetime
-import os.path
+import logging
+import pickle
 import time
+from pathlib import Path
+from typing import Optional
 
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import requests
 import scipy.ndimage.interpolation  # shift function
-def delay(npArray, days):
-    return scipy.ndimage.interpolation.shift(npArray, days, cval=0)
+import yaml
+from dateutil import parser as dateparser
+from tqdm import tqdm
 
-import fetch_data
+from corona_model import PROJECT_DIR
 
-FILENAME = fetch_data.FILENAME
-CACHETIMESECONDS = 3600 * 3  # be nice to the API to not get banned
+logger = logging.getLogger(__name__)
+logging.getLogger("matplotlib").setLevel(logging.INFO)
 
-if (not os.path.exists(FILENAME) or 
-    os.path.getmtime(FILENAME) < time.time() - CACHETIMESECONDS):
-        fetch_data.fetch()
-
-with open(FILENAME) as f:
-    s = f.read()
-    s = s.replace('Iran (Islamic Republic of)', 'Iran')  # obsolete?
-    s = s.replace('Mainland China', 'China')  # obsolete ?
-    print("read data: %i bytes" % len(s))
-d = json.loads(s)
-
-def get_country_xcdr(country='all', province='all', dateOffset=0, returnLists=False):
-    country = '' if country == 'all' else country  # empty string is same as all
-    province = '' if province == 'all' else province
-    countries = {}
-    provinces = {}
-
-    dictXYYY = {}
-    XDatesAll = []
-
-    for i, location in enumerate(d['confirmed']['locations']):
-        XDates = []
-        YConfirmed = []
-        YDeaths = []
-        YRecovered = []
-        listXYYY = []
-
-        countries[str(location['country'])] = 1
-        if country != '' and location['country'] != country:
-            continue
-        provinces[str(location['province'])] = 1
-        if province != '' and location['province'] != province:
-            continue
-        for date in location['history']:
-            confirmed = int(location['history'][date])
-            deaths = int(d['deaths']['locations'][i]['history'][date])
-            recovered = int(d['recovered']['locations'][i]['history'][date])
-            XDates.append(dateutil.parser.parse(date))
-            YConfirmed.append(confirmed)
-            YDeaths.append(deaths)
-            YRecovered.append(recovered)
-
-        for i, date in enumerate(XDates):
-            if date in dictXYYY:
-                dictXYYY[date][0] += YConfirmed[i]
-                dictXYYY[date][1] += YDeaths[i]
-                dictXYYY[date][2] += YRecovered[i]
-            else:    
-                dictXYYY[date] = [YConfirmed[i], YDeaths[i], YRecovered[i]]
-        XDatesAll.extend(XDates)
-    
-    listXYYY = []
-    XDatesAllNonEmpty = []
-    for date in dictXYYY:
-        day = (date - min(XDatesAll)).days + dateOffset
-        C, D, R = dictXYYY[date][0], dictXYYY[date][1], dictXYYY[date][2]
-        if (C + D + R) > 0:
-            listXYYY.append((day, C, D, R))
-            XDatesAllNonEmpty.append(date)
-    listXYYY.sort()  # in place by first item
-    
-    # parse countries just to display available ones in case of error
-    if returnLists:
-        countries = list(countries.keys())
-        countries.sort()
-        provinces = list(provinces.keys())
-        provinces.sort()
-        return countries, provinces
-
-    if len(listXYYY) == 0:
-        countries, provinces = get_countries()
-        if not country in countries:
-            print(countries)
-        if not province in provinces:
-            print()
-            print(provinces)
-        raise Exception("get_country_xcdr empty - country '%s' or province '%s' not found?" % (country, province))
-
-    print("todays date: %s" % datetime.date.today())
-    print("data points for %s: %s" % (country, len(listXYYY)))
-    print("first data: %s" % min(XDatesAllNonEmpty).date())
-    print("latest data: %s (you can update the data manually by running fetch_data.py)" % max(XDatesAll).date())
-
-    return listXYYY
+SCRIPT_DIR = Path(__file__).parent
+CONFIG = yaml.safe_load(SCRIPT_DIR.joinpath("config.yaml").read_text(encoding="utf-8"))
+COVID_DATA_CACHETIME = CONFIG["covid_data"]["cache_time"]
 
 
-def get_countries_provinces():
-    countries, provinces = get_country_xcdr(returnLists=True)
-    return countries, provinces
+class CovidData(object):
+    """
+    Handles the loading of covid data pulled from Johns Hopkins
+    """
+
+    url = 'https://coronavirus-tracker-api.herokuapp.com/all'
+    covid_data_pth = Path(PROJECT_DIR, CONFIG["paths"]["covid_data"])
+    y_vars = ["confirmed", "deaths", "recovered"]
+
+    def __init__(self):
+        if self.covid_data_pth.exists() is False or \
+                (self.covid_data_pth.stat().st_mtime < time.time() - COVID_DATA_CACHETIME):
+            raw_data = self.get_covid_data()
+            self.country_data = self.parse_rawdata(raw_data)
+            self.covid_data_pth.write_bytes(pickle.dumps(self.country_data))
+            logger.info(f"Covid data successfully written to {self.covid_data_pth}")
+
+        else:
+            self.country_data = pickle.loads(self.covid_data_pth.read_bytes())
+            logger.info(f"Covid data successfully read from {self.covid_data_pth}")
+
+    def get_covid_data(self, country_code: Optional[str] = None) -> str:
+        """
+        Gets the latest covid data from Johns Hopkins dataset via  an API:
+            https://github.com/ExpDev07/coronavirus-tracker-api
+        :param country_code: The ISO (alpha-2 country_code) for the country
+        :returns: JSON encoded string of response
+        """
+        req = requests.get(self.url, params={"country_code": country_code})
+        return req.text
+
+    @staticmethod
+    def delay(arr: np.ndarray, days: int):
+        return scipy.ndimage.interpolation.shift(arr, days, cval=0)
+
+    def parse_rawdata(self, raw_json: str):
+        data_raw = json.loads(raw_json)
+        country_data = {}  # Country data keyed with country_code
+        for y_var in self.y_vars:
+            for loc in tqdm(data_raw[y_var]["locations"], desc=f"Parsing {y_var} data"):
+                country_code = loc["country_code"]
+                province = loc["province"] if loc["province"] != "" else "all"
+                new_hist = {}
+                for str_date, y_val in loc["history"].items():  # Note USA datetime ordering in source
+                    date_obj = dateparser.parse(str_date, dayfirst=False)
+                    date_key = str(date_obj.date())
+                    new_hist[date_key] = {"date": date_obj, y_var: y_val}
+                new_hist = sorted(new_hist.values(), key=lambda k: k["date"])
+
+                if country_data.get(country_code) is None:
+                    country_data[country_code] = {}
+
+                if country_data[country_code].get(province) is None:
+                    country_data[country_code][province] = pd.DataFrame(new_hist).set_index("date")
+                else:
+                    country_data[country_code][province][y_var] = [d[y_var] for d in new_hist]
+
+        # Sum totals for countries with provinces
+        for country in country_data.values():
+            if country.get("all") is None:
+                country["all"] = sum([df for df in country.values()])
+
+        return country_data
+
+    def plot_location(self, ax: plt.Axes, country_code: str, province: str = "all", logscale=True):
+        chosen_df = self.country_data[country_code][province]
+        ax.plot(chosen_df.confirmed, 'b', alpha=0.5, lw=2, label='confirmed')
+        ax.plot(chosen_df.deaths, 'y', alpha=0.5, lw=2, label='deaths')
+        ax.plot(chosen_df.recovered, 'r--', alpha=0.5, lw=1, label='recovered')
+        ax.legend(title=f"COVID-19 data (beta): {country_code} {province}")
+        if logscale is True:
+            ax.set_yscale("log", nonposy='clip')
+        return ax
+
 
 if __name__ == '__main__':
-    import numpy as np
-    import matplotlib.pyplot as plt
-
-    fig = plt.figure(figsize=(10,10), dpi=200)
-    ax = fig.add_subplot(211)
-
-    COUNTRY = 'Italy'
-    PROVINCE = 'all'
-    XYYY = np.array(get_country_xcdr(COUNTRY, PROVINCE))
-    X = XYYY[:,0]
-
-    #ax.set_yscale("log", nonposy='clip')
-    ax.plot(X, XYYY[:,1], 'b', alpha=0.5, lw=2, label='confirmed')
-    ax.plot(X, XYYY[:,2], 'y', alpha=0.5, lw=2, label='deaths')
-    ax.plot(X, XYYY[:,3], 'r--', alpha=0.5, lw=1, label='recovered')
-    ax.legend(title='COVID-19 data (beta): ' + COUNTRY + " " + PROVINCE)
+    covid_data = CovidData()
+    fig = plt.figure(figsize=(10, 10), dpi=200)
+    ax1 = fig.add_subplot(211)
+    covid_data.plot_location(ax1, "AU")
 
     ax2 = fig.add_subplot(212)
+    covid_data.plot_location(ax2, "CN", "Hubei")
 
-    COUNTRY = 'Mainland China'
-    PROVINCE = 'Hubei'
-
-    XYYY = np.array(get_country_xcdr(COUNTRY, PROVINCE))
-    X = XYYY[:,0]
-
-    #ax2.set_yscale("log", nonposy='clip')
-    ax2.plot(X, XYYY[:,1], 'b', alpha=0.5, lw=2, label='confirmed')
-    ax2.plot(X, XYYY[:,2], 'y', alpha=0.5, lw=2, label='deaths')
-    ax2.plot(X, XYYY[:,3], 'r--', alpha=0.5, lw=1, label='recovered')
-    ax2.legend(title='COVID-19 data (beta): ' + COUNTRY + " " + PROVINCE)
     plt.show()
-    #plt.savefig('data.png')
-
+    # # plt.savefig('data.png')

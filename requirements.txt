@@ -1,2 +1,9 @@
-SciPy
+PyYAML
+numpy
 pandas
+pprintpp
+requests
+tqdm
+scipy
+matplotlib
+countryinfo

@@ -27,9 +27,8 @@ def setup_logging(log_config_path=f"{Path(__file__).parent}/logging_config.yaml"
             print(f"log dir not found, Attempting to create dir {log_dir}")
             Path(log_dir).mkdir(parents=True, exist_ok=True)
     except PermissionError:
-        print("WARNING: Not enough permissions to write to log_dir given. Writing to "
-              "C:/Temp/SimplewarePreprocess/logs instead.")
-        log_dir = Path("C:/Temp", "SimplewarePreprocess", "logs")
+        log_dir = Path("C:/Temp", "coronaSEIR", "logs")
+        print(f"WARNING: Not enough permissions to write to log_dir given. Writing to {log_dir} instead.")
 
     print(f"Writing log to {Path(log_dir).absolute()}")
 
@@ -53,14 +52,14 @@ def setup_logging(log_config_path=f"{Path(__file__).parent}/logging_config.yaml"
 
     new_logger = logging.getLogger(module_name)
 
-    # Catch all unhandled exceptions
-    def handle_exception(exc_type, exc_value, exc_traceback):
-        if issubclass(exc_type, KeyboardInterrupt):
-            sys.__excepthook__(exc_type, exc_value, exc_traceback)
-            return
+    # # Catch all unhandled exceptions and log
+    # def handle_exception(exc_type, exc_value, exc_traceback):
+    #     if issubclass(exc_type, KeyboardInterrupt):
+    #         sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    #         return
+    #
+    #     new_logger.error("Uncaught exception! Traceback shown below:", exc_info=(exc_type, exc_value, exc_traceback))
+    #     raise exc_type(exc_value)
 
-        new_logger.error("Uncaught exception! Traceback shown below:", exc_info=(exc_type, exc_value, exc_traceback))
-        raise exc_type(exc_value)
-
-    sys.excepthook = handle_exception
+    # sys.excepthook = handle_exception
     return new_logger, log_filename

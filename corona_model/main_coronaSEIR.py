@@ -151,7 +151,7 @@ ax.plot([min(X), max(X)], [intensiveUnits, intensiveUnits], 'b-.', alpha=0.5, lw
 if LOCKDOWN is True:
     ax.plot([lockdown_delay, lockdown_delay], [min(I), max(I)], 'b-.', alpha=0.5, lw=1, label='Lockdown Starts')
 # actual country data
-XCDR_data = np.array(world_data.get_country_xcdr(COUNTRY, PROVINCE, dateOffset=dataOffset))
+XCDR_data = np.array(world_data.get_country_xcdr(COUNTRY, PROVINCE, date_offset=dataOffset))
 
 ax.plot(XCDR_data[:, 0], XCDR_data[:, 1], 'o', color='orange', alpha=0.5, lw=1,
         label='cases actually detected in tests')

@@ -1,0 +1,8 @@
+# Config file for SEIR for settings that do not affect the simulation. All simulation parameters are stored in params.py
+
+paths:  # Relative to project directory. Use '/' characters, will be read as pathlib.Path object
+    results_output: "outputs"
+    covid_data: "corona_model/covid_data.pickle"
+
+covid_data:
+    cache_time: 3600  # In seconds, cache time of COVID data to limit requests

@@ -1,8 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-import population
-import world_data
+from corona_model import world_data
 
 countries, provinces = world_data.get_countries_provinces()
 countryPopulation = population.get_all_population_data()
@@ -17,7 +16,7 @@ for country in countries:
         deaths = int(XCDR_data[-1, 2])  # last row, third column
         if deaths < 10:
             continue
-        recovered = int(XCDR_data[-1, 3])  # last row, third column            
+        recovered = int(XCDR_data[-1, 3])  # last row, third column
         countryDeaths.append((country, cases, deaths, recovered))
 
     except:
@@ -42,7 +41,7 @@ dCountryDeathsPCXY = {}
 for country, trash, trash, trash in countryDeathsPC[0:20]:
     XCDR_data = np.array(world_data.get_country_xcdr(country))
     pop = population.get_population(country)
-    #Y = 100.0 * XCDR_data[:,2] / XCDR_data[:,1] 
+    #Y = 100.0 * XCDR_data[:,2] / XCDR_data[:,1]
     Y = XCDR_data[:,2] / pop * 1.0e6
     dCountryDeathsPCXY[country] = (XCDR_data[:,0], Y)
 

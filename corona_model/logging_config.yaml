@@ -1,4 +1,4 @@
-# Logging settings for SimplewareOverwatch
+# Logging config
 version: 1
 disable_existing_loggers: False
 formatters:
@@ -33,7 +33,7 @@ handlers:
         formatter: simple
         stream: ext://sys.stdout
 root:
-    level: DEBUG
+    level: INFO
     handlers: [debug_file_handler, console]
     propogate: True
 
