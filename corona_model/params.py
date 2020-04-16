@@ -27,7 +27,7 @@ class DiseaseParams:
     r0_init: float = beta_init / gamma
     r1_lock: float = beta_lock / gamma
 
-    time_hospital: int = 20  # Days in hospital
+    time_hospital: int = 10  # Days in hospital, after which patient either recovers or dies
     time_infected: int = 1.0 / gamma
 
     lag_communication: int = 0
@@ -35,10 +35,10 @@ class DiseaseParams:
     lag_symptom_to_hosp: int = 1
 
     rate_icu: float = 0.02  # Proportion of infected patients who end up in ICU
-    rate_fatality_0: float = 0.01  # CFR of patients that 'recover' - either dead or alive
+    rate_fatality_0: float = 0.008  # CFR of patients that 'recover' - either dead or alive
     rate_fatality_1: float = rate_fatality_0 * 2  # CFR once ICU beds are saturated  #TODO Need source
 
-    frac_asymptomatic: float = 0.0  # Fraction of infected that don't show symptoms
+    frac_asymptomatic: float = 0.5  # Fraction of infected that don't show symptoms
     find_ratio: float = (1 - frac_asymptomatic)  # Proportion of infected which are found
 
 

@@ -187,10 +187,14 @@ class ResultAnalyser(object):
 
     def icu_results(self):
         icu_limit = self.s_opts.icu_beds
-        tstep_iculimit = np.where(self.results.H >= icu_limit)[0][0]
-        date_iculimit = self.date_range[tstep_iculimit]
-        logger.info(f"Date when ICU limit hit: {date_iculimit.date()}")
-        logger.info(f"ICU limit hit in: {(date_iculimit - datetime.now()).days}")
+        try:
+            tstep_iculimit = np.where(self.results.H >= icu_limit)[0][0]
+            date_iculimit = self.date_range[tstep_iculimit]
+            logger.info(f"Date when ICU limit hit: {date_iculimit.date()}")
+            logger.info(f"ICU limit hit in: {(date_iculimit - datetime.now()).days}")
+        except IndexError:
+            logger.info(f"ICU Limit never reached. \n Maximum Hospitalised = {max(self.results.H)}")
+            date_iculimit = None
         return date_iculimit
 
     def plot(self, results: SimResults, date_range, date_iculimit):
@@ -199,8 +203,8 @@ class ResultAnalyser(object):
         if plot_opts.plot_log:
             ax.set_yscale("log", nonposy='clip')
 
-        ax.plot(date_range, results.S, 'b', alpha=0.5, lw=2, label='Susceptible')
-        ax.plot(date_range, results.E, 'y', alpha=0.5, lw=2, label='Exposed')
+        # ax.plot(date_range, results.S, 'b', alpha=0.5, lw=2, label='Susceptible')
+        # ax.plot(date_range, results.E, 'y', alpha=0.5, lw=2, label='Exposed')
         ax.plot(date_range, results.I, 'r--', alpha=0.5, lw=1, label='Infected')
         ax.plot(date_range, results.F, color='purple', alpha=0.5, lw=2, label='Number detected in testing')
         ax.plot(date_range, results.H, 'r', alpha=0.5, lw=2, label='Number in ICU')
@@ -213,14 +217,15 @@ class ResultAnalyser(object):
         ax.plot([datetime.now(), datetime.now()], [min(results.I), max(results.I)],
                 '-', alpha=0.5, lw=2, label='TODAY')
 
-        ax.plot([date_iculimit, date_iculimit], [min(results.I), max(results.I)],
-                'r-', alpha=0.5, lw=2, label=f'ICU LIMIT REACHED {date_iculimit.date()}')
+        if date_iculimit is not None:
+            ax.plot([date_iculimit, date_iculimit], [min(results.I), max(results.I)],
+                    'r-', alpha=0.5, lw=2, label=f'ICU LIMIT REACHED ({date_iculimit.date()})')
 
         if self.s_opts.lockdown is True:
             lockdown_date = date_range[self.s_opts.lockdown_delay].to_pydatetime().date()
             logger.info(f"Lockdown date: {lockdown_date}")
             ax.plot([lockdown_date, lockdown_date], [min(results.I), max(results.I)],
-                    'b-.', alpha=0.5, lw=1, label='Lockdown Starts')
+                    'b-.', alpha=0.5, lw=1, label=f'Lockdown Starts ({lockdown_date})')
 
         # Real data
         ax.plot(country_data["all"].confirmed, 'o', color='orange', alpha=0.5, lw=1,
@@ -252,10 +257,13 @@ if __name__ == '__main__':
     plot_opts = PlotOpts()
 
     # Over-ride any options here on the fly, check params.py for all parameters!
-    sim_opts.real_data_offset = 19  # How many days will the real world country data be delayed in the model
-    sim_opts.add_delays = False  # If True, will add delays to found cases, hospitalised, and deaths based on lags in DiseaseParams
+    sim_opts.sim_length = 100
+    sim_opts.real_data_offset = 16  # How many days will the real world country data be delayed in the model
+
+    sim_opts.add_delays = True  # If True, will add delays to found cases, hospitalised, and deaths based on lags in DiseaseParams
     sim_opts.lockdown = True  # If True, a lockdown will be simulated by changing beta
-    sim_opts.lockdown_delay = 45  # In Days, from start of exposure
+    sim_opts.lockdown_delay = 46  # In Days, from start of exposure
+    disease_params.beta_lock = 0.25 * disease_params.beta_init
     plot_opts.plot_log = True  # If true, plots will have a log y axis
 
     # Get real data and shift if required
