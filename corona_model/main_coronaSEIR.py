@@ -1,10 +1,11 @@
+import dataclasses
 import logging
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Tuple
-import dataclasses
+
 import matplotlib.pyplot as plt
 import matplotlib.widgets  # Cursor
 import numpy as np
@@ -59,10 +60,11 @@ class SEIRModel(object):
         N = self.n_pop  # Population of country
         S, E, I, R = state
 
+        beta = d_params.beta_init
         if s_opts.lockdown is True:
-            beta = d_params.beta_init if t <= s_opts.lockdown_delay else d_params.beta_lock
-        else:
-            beta = d_params.beta_init
+            for lock_del, beta_val in d_params.beta:
+                if t >= lock_del:
+                    beta = beta_val
 
         sigma = d_params.sigma
         gamma = d_params.gamma
@@ -146,12 +148,13 @@ class ResultAnalyser(object):
     output_dir = PROJECT_DIR.joinpath("outputs")
 
     def __init__(self, results: SimResults, p_opts: PlotOpts, date_range: pd.DatetimeIndex, n_pop: int,
-                 s_opts: SimOpts, country_data):
+                 s_opts: SimOpts, d_params: DiseaseParams, country_data):
         self.results = results
         self.p_opts = p_opts
         self.date_range = date_range
         self.n_pop = n_pop
         self.s_opts = s_opts
+        self.d_params = d_params
         self.country_data = country_data
 
     def run(self):
@@ -177,7 +180,7 @@ class ResultAnalyser(object):
         logger.info(f"Day {t} | Date: {self.date_range[t]}")
         logger.info(f"Infected: {int(res.I[t])}, {self.per_pop(res.I[t])} %")
         logger.info(f"Found in testing: {int(res.F[t])}, {self.per_pop(res.F[t])} %")
-        logger.info(f"In ICU: {int(res.H[t])}, {self.per_pop(res.H[t])} %")
+        # logger.info(f"In ICU: {int(res.H[t])}, {self.per_pop(res.H[t])} %")
         logger.info(f"Recovered: {int(res.R[t])}, {self.per_pop(res.R[t])} %")
         logger.info(f"Deaths: {int(res.D[t])}, {self.per_pop(res.D[t])} %")
         logger.info("-" * 50)
@@ -198,7 +201,7 @@ class ResultAnalyser(object):
         return date_iculimit
 
     def plot(self, results: SimResults, date_range, date_iculimit):
-        fig = plt.figure(dpi=75, figsize=(20, 16))
+        fig = plt.figure(dpi=300, figsize=(12, 7))
         ax = fig.add_subplot(111)
         if plot_opts.plot_log:
             ax.set_yscale("log", nonposy='clip')
@@ -207,25 +210,26 @@ class ResultAnalyser(object):
         # ax.plot(date_range, results.E, 'y', alpha=0.5, lw=2, label='Exposed')
         ax.plot(date_range, results.I, 'r--', alpha=0.5, lw=1, label='Infected')
         ax.plot(date_range, results.F, color='purple', alpha=0.5, lw=2, label='Number detected in testing')
-        ax.plot(date_range, results.H, 'r', alpha=0.5, lw=2, label='Number in ICU')
-        # ax.plot(X, R, 'g', alpha=0.5, lw=1, label='Recovered with immunity')
-        ax.plot(date_range, results.P, 'c', alpha=0.5, lw=1, label='Probability of infection')
+        # ax.plot(date_range, results.H, 'r', alpha=0.5, lw=2, label='Number in ICU')
+        # ax.plot(date_range, results.R, 'g', alpha=0.5, lw=1, label='Recovered with immunity')
+        # ax.plot(date_range, results.P, 'c', alpha=0.5, lw=1, label='Probability of infection')
         ax.plot(date_range, results.D, 'k', alpha=0.5, lw=1, label='Deaths')
 
         ax.plot([min(date_range), max(date_range)], [sim_opts.icu_beds, sim_opts.icu_beds], 'r-.', alpha=1, lw=1,
                 label='Number of ICU available')
         ax.plot([datetime.now(), datetime.now()], [min(results.I), max(results.I)],
-                '-', alpha=0.5, lw=2, label='TODAY')
+                '-', alpha=0.5, lw=2, label=f"TODAY ({datetime.now().date()})")
 
-        if date_iculimit is not None:
-            ax.plot([date_iculimit, date_iculimit], [min(results.I), max(results.I)],
-                    'r-', alpha=0.5, lw=2, label=f'ICU LIMIT REACHED ({date_iculimit.date()})')
+        # if date_iculimit is not None:
+        #     ax.plot([date_iculimit, date_iculimit], [min(results.I), max(results.I)],
+        #             'r-', alpha=0.5, lw=2, label=f'ICU LIMIT REACHED ({date_iculimit.date()})')
 
         if self.s_opts.lockdown is True:
-            lockdown_date = date_range[self.s_opts.lockdown_delay].to_pydatetime().date()
-            logger.info(f"Lockdown date: {lockdown_date}")
-            ax.plot([lockdown_date, lockdown_date], [min(results.I), max(results.I)],
-                    'b-.', alpha=0.5, lw=1, label=f'Lockdown Starts ({lockdown_date})')
+            for lock_del, b_val in self.d_params.beta[1:]:  # Ignore 0 as this is beta_init
+                lockdown_date = date_range[lock_del].to_pydatetime().date()
+                logger.info(f"Lockdown date: {lockdown_date} (beta = {b_val})")
+                ax.plot([lockdown_date, lockdown_date], [min(results.I), max(results.I)],
+                        'b-.', alpha=0.5, lw=1, label=f'Lockdown for beta = {round(b_val, 2)} ({lockdown_date})')
 
         # Real data
         ax.plot(country_data["all"].confirmed, 'o', color='orange', alpha=0.5, lw=1,
@@ -257,13 +261,18 @@ if __name__ == '__main__':
     plot_opts = PlotOpts()
 
     # Over-ride any options here on the fly, check params.py for all parameters!
-    sim_opts.sim_length = 100
-    sim_opts.real_data_offset = 16  # How many days will the real world country data be delayed in the model
+    sim_opts.sim_length = 150
+    sim_opts.real_data_offset = 19  # How many days will the real world country data be delayed in the model
 
     sim_opts.add_delays = True  # If True, will add delays to found cases, hospitalised, and deaths based on lags in DiseaseParams
     sim_opts.lockdown = True  # If True, a lockdown will be simulated by changing beta
-    sim_opts.lockdown_delay = 46  # In Days, from start of exposure
-    disease_params.beta_lock = 0.25 * disease_params.beta_init
+
+    beta_init = 1 / 2.5
+    disease_params.beta = ((0, beta_init),
+                           (44, beta_init * 0.25),
+                           (47, beta_init * 0.24),
+                           (55, beta_init * 0.20))
+
     plot_opts.plot_log = True  # If true, plots will have a log y axis
 
     # Get real data and shift if required
@@ -279,5 +288,5 @@ if __name__ == '__main__':
     date_range = pd.date_range(start_date, periods=len(results.T), freq="D")
 
     analyser = ResultAnalyser(results, plot_opts, date_range, n_pop=model.n_pop, s_opts=sim_opts,
-                              country_data=country_data)
+                              d_params=disease_params, country_data=country_data)
     analyser.run()
